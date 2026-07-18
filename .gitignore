@@ -17,6 +17,7 @@ build/
 tests/output/
 tests/temp_*/
 tests/images/
+tests/test_pdfs/
 tests/*.pdf
 
 pdf_tool/wechat_ocr_res/__pycache__/
@@ -27,3 +28,9 @@ Thumbs.db
 *.log
 *.tmp
 *.temp
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
