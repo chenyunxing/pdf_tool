@@ -1,0 +1,51 @@
+---
+description: PDF 工具的 API、OCR 流程和实现约定
+globs: "pdf_tool/**/*.py"
+alwaysApply: false
+---
+
+# PDF 模块约定
+
+## 调用关系
+
+`pdf_to_text`：逐页渲染 PNG（DPI 200，poppler 用 `get_poppler_path()`）→ 立刻 `WeChatOCR.ocr` → 删除该页图片 → 短页丢弃，其余文字马上追加进 UTF-8 TXT 并 flush。临时目录默认 `output/images/<pdf名>/`，任务结束删除空目录。开始时会清空已有同名 TXT。
+
+批量转换共用一个 `WeChatOCR`，走 `convert_pdf_to_text_with_ocr`，结束时 `stop()`。`image_dir` 只放当前页的临时图片。
+
+`WeChatOCR` 默认资源：
+
+- `wechat_path`：`pdf_tool/wechat_ocr_res`
+- `wechatocr_path`：`pdf_tool/wechat_ocr_res/WeChatOCR.exe`
+
+`ocr()` 返回 `{"ocr_response": [{"text", "left", "top", "right", "bottom"}]}`。回调按绝对路径取结果。改 `third_party/wechat_ocr` 时保持与现有 exe/dll 的协议兼容。
+
+`convert_pdf_to_text` 可选 `on_page(page, total)`、`on_page_error(page, message)`、`should_continue()`。`should_continue` 返回假时，在下一页开始前抛出 `ConversionStopped`。已经写入的文本留在文件里，由调用方决定是否删除。`pdf_page_count` 用同一套 poppler 读页数。
+
+转 Word 和转 Excel 先读文本层。某一页去掉空白后不足 30 字，且没有文字、或有一张占页面 45% 以上的图时，视为扫描页：按转文字的同一套渲染和 `WeChatOCR.ocr` 识别。转 Word 按文字框的位置排进文档，不把整页扫描图再贴进去。转 Excel 把识别出的文字按同样的顺序逐行写入，`table_only` 也不丢掉这些行。识别失败的页记下错误并继续。`should_continue` 返回假时，在下一页开始前抛出 `ConversionStopped`，不保存这一份。
+
+## 参数默认值
+
+| 函数 | 关键默认 |
+|------|----------|
+| `convert_pdf_to_text` | `min_text_length=50`，短页不写入 |
+| `convert_pdf_to_images` | `png`，`dpi=200`，`clear_existing=True` |
+| `split_pdf` | `pages_per_file=1`，文件名 `{name}_pages_{起}-{止}.pdf` |
+| `merge_pdfs` | 缺省输出 `merged_output.pdf`，按传入顺序 |
+| `delete_pages` | 页码从 1 开始，去重后校验范围。`start_page` / `end_page` 缺省为整份，结果只含这一段 |
+| `compress_pdf` | 级别 1–5，默认 3；返回含路径和压缩率的 dict。`start_page` / `end_page` 缺省为整份 |
+| `convert_pdf_to_word` | `include_images=True`。`start_page` / `end_page` 缺省为整份 |
+| `convert_pdf_to_excel` | `table_only=False`。`start_page` / `end_page` 缺省为整份 |
+| `rotate_pdf` | 顺时针 `angle` 为 90、180 或 270，默认 90。页范围外的页保持原角度 |
+| `add_watermark` | 一条斜放文字，不透明度 0.28。页范围外的页不加 |
+| `encrypt_pdf` | AES-256，打开口令与权限口令相同 |
+| `decrypt_pdf` | 口令正确后另存一份未加密 PDF |
+
+单文件的 `output_path` 是文件路径；批量函数的 `output_dir` 是目录。CLI 在传给单文件函数前要区分这两者。
+
+## 转 Word
+
+按页写入。有文字层的页：表格里的文字不再单独成段。其余文字块、图片和表格先按栏从上到下排，再从左栏到右栏。横跨版心的块插在上下两栏之间。扫描页的文字框用同一套栏序。页码从 1 开始。
+
+## 压缩级别
+
+1 清理结构，2 再压缩内容流，3 起优化图片，4 重新压缩图片，5 提高压缩率并允许降低画质。保存使用 `garbage=级别` 且 `deflate=True`。

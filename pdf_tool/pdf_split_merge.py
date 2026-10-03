@@ -90,11 +90,28 @@ def merge_pdfs(
     return output_path
 
 
+def _page_bounds(total_pages: int, start_page: int | None, end_page: int | None) -> tuple[int, int]:
+    start = 1 if start_page is None else start_page
+    end = total_pages if end_page is None else end_page
+    if isinstance(start, bool) or not isinstance(start, int) or start < 1:
+        raise ValueError("起始页须是从 1 开始的正整数")
+    if isinstance(end, bool) or not isinstance(end, int) or end < 1:
+        raise ValueError("结束页须是从 1 开始的正整数")
+    if start > total_pages:
+        raise ValueError(f"起始页 {start} 超出范围（PDF共 {total_pages} 页）")
+    end = min(end, total_pages)
+    if start > end:
+        raise ValueError("没有可处理的页面")
+    return start, end
+
+
 def delete_pages(
-    pdf_path,
-    pages_to_delete,
-    output_path=None
-):
+    pdf_path: str,
+    pages_to_delete: list[int],
+    output_path: str | None = None,
+    start_page: int | None = None,
+    end_page: int | None = None,
+) -> str:
     if not os.path.isfile(pdf_path):
         raise FileNotFoundError(f"PDF文件不存在: {pdf_path}")
 
@@ -103,12 +120,16 @@ def delete_pages(
 
     reader = PdfReader(pdf_path)
     total_pages = len(reader.pages)
+    first, last = _page_bounds(total_pages, start_page, end_page)
 
     pages_to_delete = sorted(set(pages_to_delete))
 
+    whole = first == 1 and last == total_pages
     for page in pages_to_delete:
-        if page < 1 or page > total_pages:
-            raise ValueError(f"页码 {page} 超出范围（PDF共 {total_pages} 页）")
+        if page < first or page > last:
+            if whole:
+                raise ValueError(f"页码 {page} 超出范围（PDF共 {total_pages} 页）")
+            raise ValueError(f"页码 {page} 超出范围（当前页范围为 {first}-{last}）")
 
     if output_path is None:
         pdf_dir = os.path.dirname(pdf_path)
@@ -120,10 +141,14 @@ def delete_pages(
         os.makedirs(output_dir, exist_ok=True)
 
     writer = PdfWriter()
+    removed = set(pages_to_delete)
 
-    for i in range(total_pages):
-        if (i + 1) not in pages_to_delete:
-            writer.add_page(reader.pages[i])
+    for page in range(first, last + 1):
+        if page not in removed:
+            writer.add_page(reader.pages[page - 1])
+
+    if len(writer.pages) == 0:
+        raise ValueError("不能删除全部页面")
 
     with open(output_path, "wb") as f:
         writer.write(f)
@@ -154,6 +179,8 @@ if __name__ == "__main__":
     delete_parser.add_argument("pdf_path", help="要处理的PDF文件路径")
     delete_parser.add_argument("pages", type=int, nargs="+", help="要删除的页码（从1开始）")
     delete_parser.add_argument("-o", "--output", help="输出文件路径")
+    delete_parser.add_argument("-s", "--start-page", type=int, help="起始页码（从1开始）")
+    delete_parser.add_argument("-e", "--end-page", type=int, help="结束页码（从1开始）")
 
     args = parser.parse_args()
 
@@ -174,7 +201,9 @@ if __name__ == "__main__":
         delete_pages(
             args.pdf_path,
             pages_to_delete=args.pages,
-            output_path=args.output
+            output_path=args.output,
+            start_page=args.start_page,
+            end_page=args.end_page,
         )
     else:
         parser.print_help()

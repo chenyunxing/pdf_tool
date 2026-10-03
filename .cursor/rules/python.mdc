@@ -1,0 +1,20 @@
+---
+description: Python 命名、风格和错误处理
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python 规范
+
+- 模块、函数、变量用 snake_case；类用 PascalCase；常量用 UPPER_SNAKE。
+- 4 空格缩进，行宽不超过 120，遵循 PEP 8。对外函数写类型注解。
+- 只在意图不明显时写注释。
+- 捕获具体异常。错误信息用中文，并带上路径或页码。用 `finally` 关闭 OCR 进程和 PDF 文档。不要裸 `except`。
+- 单文件函数与目录批量函数分开。CLI 放在 `if __name__ == "__main__"`，用 argparse。
+- 库函数返回输出路径，或压缩结果 dict。失败抛异常，不要只打印后继续。
+
+```python
+def convert_pdf_to_text(pdf_path: str, output_dir: str | None = None) -> str:
+    if not os.path.isfile(pdf_path):
+        raise FileNotFoundError(f"PDF文件不存在: {pdf_path}")
+```

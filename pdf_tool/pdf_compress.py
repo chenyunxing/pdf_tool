@@ -1,11 +1,29 @@
+import io
 import os
 
 
+def _page_bounds(total_pages: int, start_page: int | None, end_page: int | None) -> tuple[int, int]:
+    start = 1 if start_page is None else start_page
+    end = total_pages if end_page is None else end_page
+    if isinstance(start, bool) or not isinstance(start, int) or start < 1:
+        raise ValueError("起始页须是从 1 开始的正整数")
+    if isinstance(end, bool) or not isinstance(end, int) or end < 1:
+        raise ValueError("结束页须是从 1 开始的正整数")
+    if start > total_pages:
+        raise ValueError(f"起始页 {start} 超出范围（PDF共 {total_pages} 页）")
+    end = min(end, total_pages)
+    if start > end:
+        raise ValueError("没有可处理的页面")
+    return start, end
+
+
 def compress_pdf(
-    pdf_path,
-    output_path=None,
-    compression_level=3
-):
+    pdf_path: str,
+    output_path: str | None = None,
+    compression_level: int = 3,
+    start_page: int | None = None,
+    end_page: int | None = None,
+) -> dict:
     import fitz
 
     if not os.path.isfile(pdf_path):
@@ -13,33 +31,6 @@ def compress_pdf(
 
     if compression_level < 1 or compression_level > 5:
         raise ValueError("压缩级别必须在1-5之间")
-
-    print("读取PDF文件...")
-    doc = fitz.open(pdf_path)
-
-    if compression_level >= 3:
-        print("优化图片...")
-        for page in doc:
-            for img in page.get_images(full=True):
-                xref = img[0]
-                base_image = doc.extract_image(xref)
-                image_bytes = base_image["image"]
-
-                if compression_level >= 4:
-                    try:
-                        pix = fitz.Pixmap(base_image)
-                        if pix.n > 4:
-                            pix = fitz.Pixmap(fitz.csRGB, pix)
-
-                        if compression_level == 5:
-                            pix.set_dpi(pix.xres // 2, pix.yres // 2)
-
-                        new_image = pix.tobytes("png")
-                        if len(new_image) < len(image_bytes):
-                            doc.update_image(xref, new_image)
-                        pix = None
-                    except Exception:
-                        pass
 
     if output_path is None:
         pdf_dir = os.path.dirname(pdf_path)
@@ -50,12 +41,52 @@ def compress_pdf(
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    print("保存压缩后的PDF...")
-    garbage_level = compression_level
-    doc.save(output_path, garbage=garbage_level, deflate=True)
-    doc.close()
+    print("读取PDF文件...")
+    doc = fitz.open(pdf_path)
+    subset = None
+    try:
+        first, last = _page_bounds(doc.page_count, start_page, end_page)
+        working = doc
+        original_size = os.path.getsize(pdf_path)
+        if first != 1 or last != doc.page_count:
+            subset = fitz.open()
+            subset.insert_pdf(doc, from_page=first - 1, to_page=last - 1)
+            working = subset
+            buffer = io.BytesIO()
+            working.save(buffer, garbage=0, deflate=False)
+            original_size = buffer.tell()
 
-    original_size = os.path.getsize(pdf_path)
+        if compression_level >= 3:
+            print("优化图片...")
+            for page in working:
+                for img in page.get_images(full=True):
+                    xref = img[0]
+                    base_image = working.extract_image(xref)
+                    image_bytes = base_image["image"]
+
+                    if compression_level >= 4:
+                        try:
+                            pix = fitz.Pixmap(base_image)
+                            if pix.n > 4:
+                                pix = fitz.Pixmap(fitz.csRGB, pix)
+
+                            if compression_level == 5:
+                                pix.set_dpi(pix.xres // 2, pix.yres // 2)
+
+                            new_image = pix.tobytes("png")
+                            if len(new_image) < len(image_bytes):
+                                working.update_image(xref, new_image)
+                            pix = None
+                        except (ValueError, RuntimeError):
+                            pass
+
+        print("保存压缩后的PDF...")
+        working.save(output_path, garbage=compression_level, deflate=True)
+    finally:
+        if subset is not None:
+            subset.close()
+        doc.close()
+
     compressed_size = os.path.getsize(output_path)
     compression_ratio = (1 - compressed_size / original_size) * 100
 
@@ -75,7 +106,9 @@ def compress_pdf(
 def batch_compress_pdf(
     input_dir,
     output_dir=None,
-    compression_level=3
+    compression_level=3,
+    start_page=None,
+    end_page=None,
 ):
     if not os.path.isdir(input_dir):
         raise FileNotFoundError(f"输入目录不存在: {input_dir}")
@@ -104,7 +137,9 @@ def batch_compress_pdf(
             result = compress_pdf(
                 pdf_path,
                 output_path=output_path,
-                compression_level=compression_level
+                compression_level=compression_level,
+                start_page=start_page,
+                end_page=end_page,
             )
             all_results.append(result)
         except Exception as e:
@@ -127,6 +162,8 @@ if __name__ == "__main__":
         choices=[1, 2, 3, 4, 5],
         help="压缩级别（1-5，级别越高压缩率越大）"
     )
+    parser.add_argument("-s", "--start-page", type=int, help="起始页码（从1开始）")
+    parser.add_argument("-e", "--end-page", type=int, help="结束页码（从1开始）")
 
     args = parser.parse_args()
 
@@ -134,13 +171,17 @@ if __name__ == "__main__":
         compress_pdf(
             args.pdf_path,
             output_path=args.output,
-            compression_level=args.compression_level
+            compression_level=args.compression_level,
+            start_page=args.start_page,
+            end_page=args.end_page,
         )
     elif os.path.isdir(args.pdf_path):
         batch_compress_pdf(
             args.pdf_path,
             output_dir=args.output,
-            compression_level=args.compression_level
+            compression_level=args.compression_level,
+            start_page=args.start_page,
+            end_page=args.end_page,
         )
     else:
         print(f"路径不存在: {args.pdf_path}")

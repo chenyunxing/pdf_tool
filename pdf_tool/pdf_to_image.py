@@ -1,6 +1,7 @@
 import os
 import shutil
 from pdf2image import convert_from_path
+from .poppler import get_poppler_path
 
 
 def clear_folder(folder_path):
@@ -52,7 +53,8 @@ def convert_pdf_to_images(
         pdf_path,
         dpi=dpi,
         first_page=start_page,
-        last_page=end_page
+        last_page=end_page,
+        poppler_path=get_poppler_path(),
     )
 
     total_pages = len(images)

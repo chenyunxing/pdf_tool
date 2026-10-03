@@ -1,0 +1,40 @@
+---
+description: pdf_tool 的产品边界、模块划分和平台约束
+alwaysApply: true
+---
+
+# pdf_tool
+
+本地 Windows PDF 工具包。处理在本机完成，不上传文件。
+
+## 模块
+
+| 文件 | 职责 | 依赖 |
+|------|------|------|
+| `pdf_to_text.py` | 扫描件转 TXT | pdf2image + 微信 OCR |
+| `pdf_to_image.py` | PDF 转图片 | pdf2image / poppler |
+| `pdf_split_merge.py` | 拆分、合并、删页 | PyPDF2 |
+| `pdf_compress.py` | 压缩 | PyMuPDF |
+| `pdf_to_office.py` | 转 Word / Excel | PyMuPDF、python-docx、openpyxl |
+| `pdf_rotate.py` | 旋转 | PyMuPDF |
+| `pdf_watermark.py` | 水印 | PyMuPDF |
+| `pdf_crypto.py` | 加密、解密 | PyMuPDF |
+| `wechat_ocr.py` | OCR 封装 | `wechat_ocr_res/`、`third_party/wechat_ocr/` |
+| `web/` | 本机网页工作台 | 调用上面的单文件函数 |
+
+公开 API 只从 `pdf_tool/__init__.py` 导出单文件函数。批量函数留在各模块。网页不从 `__init__.py` 导出。
+
+网页监听局域网，不设口令。工作台是共用的。任务、队列、结果、页范围、跳过页的含义以 `GLOSSARY.md` 为准。
+
+## 约束
+
+- 仅 Windows 64 位、Python 3.7+。OCR 只用内置的 `WeChatOCR.exe` 与 `mmmojo_64.dll`，不要改成必须安装微信客户端。
+- `pdf2image` 使用内置 `third_party/poppler-26.09.0/Library/bin`，不要改回依赖系统 PATH。
+- 新工具新增独立模块，并同步 `__init__.py` 与 README。
+- `__version__` 在 `__init__.py`，当前是 `0.12.0`，与 README 功能日志最新一条一致。改版本时两处一起改。
+- 仓库没有 `pyproject.toml` / `setup.py`，不要假设 `pip install .` 可用。
+
+## 页码
+
+- 库接口 `skip_pages`：从 0 开始。
+- CLI `-s`，以及拆分、删页、转图片的起止页：从 1 开始，在入口转换成 0 起下标。
